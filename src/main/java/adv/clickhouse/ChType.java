@@ -33,6 +33,9 @@ public enum ChType implements ChConverter {
     STRING {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToString((ChEnumeration) fieldValue);
+            }
             return ClickHouseUtil.formatString((String) fieldValue);
         }
 
@@ -118,7 +121,10 @@ public enum ChType implements ChConverter {
     UINT8 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
-            if (Boolean.class.isAssignableFrom(fieldType)) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
+            if (fieldType != null && Boolean.class.isAssignableFrom(fieldType)) {
                 return ClickHouseUtil.formatDecimalBoolean((Boolean) fieldValue);
             }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
@@ -126,7 +132,7 @@ public enum ChType implements ChConverter {
 
         @Override
         public Object parseObject(Class<?> fieldType, String sqlName, Object jdbcValue) {
-            if (Boolean.class.isAssignableFrom(fieldType)) {
+            if (fieldType != null && Boolean.class.isAssignableFrom(fieldType)) {
                 return ClickHouseUtil.parseDecimalBoolean((Long) jdbcValue);
             }
             return ClickHouseUtil.parseNumber(fieldType, sqlName, jdbcValue);
@@ -138,6 +144,9 @@ public enum ChType implements ChConverter {
     UINT16 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -150,6 +159,9 @@ public enum ChType implements ChConverter {
     UINT32 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -175,6 +187,9 @@ public enum ChType implements ChConverter {
     UINT64 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -187,6 +202,9 @@ public enum ChType implements ChConverter {
     INT8 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -199,6 +217,9 @@ public enum ChType implements ChConverter {
     INT16 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -211,6 +232,9 @@ public enum ChType implements ChConverter {
     INT32 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -223,6 +247,9 @@ public enum ChType implements ChConverter {
     INT64 {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                return ClickHouseUtil.formatChEnumToNumber((ChEnumeration) fieldValue, this);
+            }
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
         }
 
@@ -230,7 +257,18 @@ public enum ChType implements ChConverter {
         public Object parseObject(Class<?> fieldType, String sqlName, Object jdbcValue) {
             return ClickHouseUtil.parseNumber(fieldType, sqlName, jdbcValue);
         }
+    },
+
+    ENUM8 {
+        @Override
+        public String formatObject(Class<?> fieldType, Object fieldValue) {
+            return ClickHouseUtil.formatChEnumToString((ChEnumeration) fieldValue);
+        }
+
+        @Override
+        public Object parseObject(Class<?> fieldType, String sqlName, Object jdbcValue) {
+            // todo подумать как доставать. пока не используем
+            return null;
+        }
     };
-
-
 }

@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.Nullable;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.validation.constraints.NotNull;
@@ -33,6 +34,67 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static adv.util.Check.notNull;
 import static adv.util.DateUtil.now;
 
+/*
+Про глюки с clickhouse:
+--
+В CH нет четкой логики на какую ошибку повторные вставки можно делать а на какую нельзя.
+Путем проб и ошибок мы пришли к тому что надо ретраить если любая ошибка не связанная со стукторой запроса (т.е. не кривой sql = Code: 252)
+Это более менее работало последние год-два.
+
+Что сломалось: стейдж втыкает данные в clickhouse, получает какой-то http код ошибки (не 200) c текстом ошибки (DB::Exception Too many parts)
+и согласно концепции надо повторить insert - далее идет логика ретрая
+Но из за глюков запрос на самом деле попадает как кусочек на диск и мержится кликхаусом (хотя мы и получили ошибку).
+Итог = база переполняется запросами на мерж.
+
+Как с этим борются в php либе:
+--
+В каждую таблицу добавляют колонку batchId, и через день или час делают select в базу на предмет попала ли хотя бы 1 строчка с этим batchId в базу.
+Если не попала - по крону пытается сделать повторный insert (это один вариант в некоторых проектах)
+Либо руками запускают скрипт который пытается сделать повторный insert (это другой вариант в некоторых проектах)
+Ключевая мысль здесь - не верить ни http коду ошибки, ни тексту ошибки, вообще ничему кроме кода 200 (=успешная вставка)
+
+
+Как надо сделать в ClickhouseDao:
+--
+1) при даунтайме базы core должен продолжать работать пока не кончится место на диске
+т.е. если скорости диска хватает - все должно работать
+
+2) если ch выдает сложные и хитрые ошибки - мы не должны их анализировать, т.к. коды ответа могут нас обманывать,
+а повторные попытки вставить данные могут привести к дублям.
+т.е. стратегия досылки данных - втыкать их потом руками сисадмина чз скрипт
+
+3) мы должны работать даже с очень большими строчками, т.е. уметь адекватно оценивать размер одного батча для вставки
+- большой батч = плохо. не нужно копить слишком много в памяти,
+ранее мы утыкались в размер страницы очереди которую использовали
+также мы можем получать таймауты при операциях работы с ch.
+- маленький батч = плохо, это значит втыкать слишком часто т.к. при наличии 4 нодов и N таблиц мы можем делать 4*N вставок
+
+4) ? использовать идентификатор батча в каждой строке данных чтобы не втыкать дубли данных
+
+5) размер батча или частота втыкания может быть разной для разных таблиц
+
+6) разные таблицы мы можем хотеть втыкать в разные ноды сервера
+
+реализация:
+--
+для каждой таблицы по триггеру (Х секунд=60 или Y мегабайт=200) мы формируем батч с уникальным ID (например hash64(uuidv4)).
+батч пишем на диск и потом пытаемся послать в CH в один поток.
+если успешно послали - переименовываем файл на диске в посланный. держим на диске не более чем Z файлов.
+чтобы оценить мегабайты - держим в памяти 100 рандомных строк этой таблицы (постоянно пополняем их),
+считаем средний размер строки, считаем сколько строк надо на 1мб, умножаем это на 200.
+
+если получилось (http 200) - все окей.
+если не получилось - не пытаемся анализировать ошибку - скидываем его на диск в файл.
+такие батчи через день должны втыкаться по крону.
+
+7) желательно хранить каждый батч на диске как csv/sql файл
+желательно писать в tmp файл а потом переименовывать чтобы не получать битые файлы при kill -9 ?
+пример формата именования файлов batch#8129830_table1_181107_163925.857.sql
+
+Пример ошибки too many parts
+2019.11.26 14:08:01.956115 [ 15121 ] {d77c1957-694f-47b3-b86e-f9f56259ae9f} <Error> executeQuery: Code: 252, e.displayText() = DB::Exception: Too many parts (301). Merges are processing significantly slower than inserts. (version 19.9.4.34 (official build)) (from [::ffff:10.85.0.181]:52676) (in query: INSERT INTO ...
+
+*/
 @SuppressWarnings("unchecked")
 @Component
 public class ClickHouseDao {
@@ -180,39 +242,52 @@ public class ClickHouseDao {
         try {
             for (Map.Entry<Class, ConcurrentLinkedQueue<DbEvent>> queueEntry : writeCache.entrySet()) {
                 ConcurrentLinkedQueue<? extends DbEvent> impEvents = queueEntry.getValue();
-                final int batchSize = impEvents.size();
-                if (batchSize == 0) {
+                if (impEvents.size() == 0) {
                     continue;
                 }
 
                 Class<? extends DbEvent> clazz = impEvents.peek().getClass();
                 DbEvent evt;
                 while ((evt = impEvents.poll()) != null) {
-                    insertCount.incrementAndGet();
-                    BatchWriter insertBuilder = getBatch(clazz);
-                    insertBuilder.push(evt);
-
-                    boolean triggerBatch = insertBuilder.getSize() > triggerBatchSize;
-                    boolean triggerTime = !DateUtil.checkNoTimeout(insertBuilder.getCreationTs(), triggerDelay);
-                    if (triggerBatch || triggerTime) {
-                        log.debug("writeImpInBatch(): {} triggerBatch: {}/{}#queued, triggerTime: {}",
-                                queueEntry.getKey().getSimpleName(), triggerBatch, batchSize, triggerTime);
-                        insertBuilder.finish();
-                        String insertStatement = insertBuilder.getStatement();
-                        batches.remove(clazz);
-                        if (log.isTraceEnabled()) {
-                            log.trace("saving query: {}", insertStatement);
-                        }
-                        try {
-                            saveAndSend(insertBuilder, insertStatement);
-                        } catch (Exception e) {
-                            log.error("failed to insert batch#", insertCount.get(), e);
-                        }
-                    }
+                    appendToBatchAndFlushIfNeeded(clazz, evt);
                 }
+            }
+            Set<Map.Entry<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>>> s = new HashSet<>(batches.entrySet());
+            for (Map.Entry<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>> entry : s) {
+                appendToBatchAndFlushIfNeeded(entry.getKey(), null);
             }
         } catch (Exception e) {
             log.error("error building batch sql", e);
+        }
+    }
+
+    /**
+     * Добавляем evt в batch, или ничего не делаем если null
+     * Проверяем не надо ли флашнуть batch
+     * @param evtClazz класс с котором ассоциирован батч
+     * @param evt объект для запили
+     */
+    private void appendToBatchAndFlushIfNeeded(@NotNull Class<? extends DbEvent> evtClazz, @Nullable DbEvent evt) {
+        BatchWriter batchWriter = getBatch(evtClazz);
+        if (evt != null) {
+            batchWriter.push(evt);
+        }
+        boolean triggerBatch = batchWriter.getSize() >= triggerBatchSize;
+        boolean triggerTimeAndNotEmpty = !DateUtil.checkNoTimeout(batchWriter.getCreationTs(), triggerDelay) && batchWriter.hasData();
+        if (triggerBatch || triggerTimeAndNotEmpty) {
+            log.debug("writeImpInBatch(): class: {} triggerBySize: {}, triggerByTime: {}", evtClazz.getSimpleName(), triggerBatch, triggerTimeAndNotEmpty);
+            batchWriter.finish();
+            String insertStatement = batchWriter.getStatement();
+            batches.remove(evtClazz);
+            if (log.isTraceEnabled()) {
+                log.trace("saving query: {}", insertStatement);
+            }
+            try {
+                saveAndSend(batchWriter, insertStatement);
+                insertCount.incrementAndGet();
+            } catch (Exception e) {
+                log.error("failed to insert batch#{}", insertCount.get(), e);
+            }
         }
     }
 

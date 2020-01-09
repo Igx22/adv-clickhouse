@@ -2,6 +2,7 @@ package adv.clickhouse;
 
 
 import adv.util.BitUtil;
+import adv.util.Check;
 import org.jetbrains.annotations.NotNull;
 
 import java.time.LocalDate;
@@ -166,5 +167,47 @@ public class ClickHouseUtil {
             return ((Number) jdbcValue).shortValue();
         }
         throw new IllegalStateException(String.format("invalid fieldType: %s fieldName: %s jdbcValue: %s", fieldType, sqlName, jdbcValue));
+    }
+
+    public static String singleQuote(String val) {
+        return "'" + val + "'";
+    }
+
+    public static String formatChEnumToString(ChEnumeration fieldValue) {
+        Check.notNull(fieldValue, "Got ENUM with null value, please provide a reasonable default for enum");
+        return singleQuote(fieldValue.getChName());
+    }
+
+    public static String formatChEnumToNumber(ChEnumeration fieldValue, ChType conv) {
+        long value;
+        if (fieldValue == null) {
+            value = 0;
+        } else {
+            value = fieldValue.getChIndex();
+        }
+        if (conv == ChType.INT8) {
+            isTrue(Byte.MIN_VALUE <= value && value <= BitUtil.INT8_MAX, "value out of range %s", value);
+        }
+        if (conv == ChType.INT16) {
+            isTrue(Short.MIN_VALUE <= value && value <= BitUtil.INT16_MAX, "value out of range %s", value);
+        }
+        if (conv == ChType.INT32) {
+            isTrue(Integer.MIN_VALUE <= value && value <= BitUtil.INT32_MAX, "value out of range %s", value);
+        }
+        if (conv == ChType.INT64) {
+        }
+        if (conv == ChType.UINT8) {
+            isTrue(0 <= value && value <= BitUtil.UINT8_MAX, "value out of range %s", value);
+        }
+        if (conv == ChType.UINT16) {
+            isTrue(0 <= value && value <= BitUtil.UINT16_MAX, "value out of range %s", value);
+        }
+        if (conv == ChType.UINT32) {
+            isTrue(0 <= value && value <= BitUtil.UINT32_MAX, "value out of range %s", value);
+        }
+        if (conv == ChType.UINT64) {
+            return Long.toUnsignedString(value);
+        }
+        return Long.toString(value);
     }
 }

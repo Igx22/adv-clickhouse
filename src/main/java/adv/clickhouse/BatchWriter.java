@@ -97,6 +97,10 @@ public class BatchWriter<T extends DbEvent> {
         firstRow = false;
     }
 
+    public boolean hasData() {
+        return !firstRow;
+    }
+
     public int getSize() {
         return insert.length();
     }
