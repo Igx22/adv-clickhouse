@@ -53,9 +53,13 @@ public class ChAnnotationScanner {
     }
 
     private void doScan() {
+        log.debug("searching for default CH classes in path adv.clickhouse.model");
+        Reflections defaultClasses = new Reflections("adv.clickhouse.model",
+                new TypeAnnotationsScanner(), new FieldAnnotationsScanner(), new SubTypesScanner());
         log.debug("searching for " + ChTable.class + " in path " + pkg);
         Reflections reflections = new Reflections(pkg,
                 new TypeAnnotationsScanner(), new FieldAnnotationsScanner(), new SubTypesScanner());
+        reflections.merge(defaultClasses);
         Set<Class<?>> annotatedClasses = reflections.getTypesAnnotatedWith(ChTable.class);
         for (Class<?> clazz : annotatedClasses) {
             ChClassInfo classInfo = new ChClassInfo();
