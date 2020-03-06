@@ -1,5 +1,7 @@
 package adv.clickhouse;
 
+import org.apache.commons.lang3.EnumUtils;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -132,6 +134,11 @@ public enum ChType implements ChConverter {
 
         @Override
         public Object parseObject(Class<?> fieldType, String sqlName, Object jdbcValue) {
+            if(fieldType != null && ChEnumeration.class.isAssignableFrom(fieldType)) {
+                ChEnumeration enumConstant = (ChEnumeration) fieldType.getEnumConstants()[0];
+                long longValue = (Long) jdbcValue;
+                return enumConstant.getByChIndex((int) longValue);
+            }
             if (fieldType != null && Boolean.class.isAssignableFrom(fieldType)) {
                 return ClickHouseUtil.parseDecimalBoolean((Long) jdbcValue);
             }

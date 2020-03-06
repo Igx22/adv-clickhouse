@@ -11,4 +11,6 @@ public interface ChEnumeration {
 
    // числовой вид enum (если будем класть в INTXX колонки)
    int getChIndex();
+
+    ChEnumeration getByChIndex(int i);
 }
