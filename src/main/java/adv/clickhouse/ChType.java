@@ -1,7 +1,5 @@
 package adv.clickhouse;
 
-import org.apache.commons.lang3.EnumUtils;
-
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -182,6 +180,18 @@ public enum ChType implements ChConverter {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
             return ClickHouseUtil.formatNumber((Number) fieldValue, this);
+        }
+
+        @Override
+        public Object parseObject(Class<?> fieldType, String sqlName, Object jdbcValue) {
+            return ClickHouseUtil.parseNumber(fieldType, sqlName, jdbcValue);
+        }
+    },
+
+    DECIMAL18_8 {
+        @Override
+        public String formatObject(Class<?> fieldType, Object fieldValue) {
+            return ClickHouseUtil.formatDecimal18_8((Number) fieldValue, this);
         }
 
         @Override

@@ -5,6 +5,7 @@ import adv.util.BitUtil;
 import adv.util.Check;
 import org.jetbrains.annotations.NotNull;
 
+import java.text.DecimalFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -17,6 +18,7 @@ import static adv.util.Check.isTrue;
 public class ClickHouseUtil {
     private static final DateTimeFormatter FORMATTER_YYYYMMDD = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter FORMATTER_YYYYMMDD_HHMMSS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    public static final DecimalFormat DECIMAL_FORMAT18_8 = new DecimalFormat("#.########");
 
     public static String formatByte(byte value) {
         return Integer.toString(value);
@@ -154,6 +156,20 @@ public class ClickHouseUtil {
             }
         }
         return Long.toString(value);
+    }
+
+    public static String formatDecimal18_8(Number aValue, ChType conv) {
+        Check.isTrue(ChType.DECIMAL18_8.equals(conv));
+        if (aValue == null) {
+            return "0";
+        }
+        if (aValue instanceof Float) {
+            return DECIMAL_FORMAT18_8.format((Float) aValue);
+        } else if (aValue instanceof Double) {
+            return DECIMAL_FORMAT18_8.format((Double) aValue);
+        } else {
+            throw new IllegalStateException("unsupported type" + aValue.getClass());
+        }
     }
 
     @NotNull
