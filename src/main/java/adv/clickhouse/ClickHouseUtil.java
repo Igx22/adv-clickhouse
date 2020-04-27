@@ -181,6 +181,8 @@ public class ClickHouseUtil {
             return ((Number) jdbcValue).intValue();
         } else if (Short.class.isAssignableFrom(fieldType)) {
             return ((Number) jdbcValue).shortValue();
+        } else if (Double.class.isAssignableFrom(fieldType)) {
+            return Double.valueOf(String.valueOf(jdbcValue));
         }
         throw new IllegalStateException(String.format("invalid fieldType: %s fieldName: %s jdbcValue: %s", fieldType, sqlName, jdbcValue));
     }
