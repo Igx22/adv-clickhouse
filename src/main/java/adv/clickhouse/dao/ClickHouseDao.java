@@ -30,6 +30,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static adv.util.Check.notNull;
 import static adv.util.DateUtil.now;
@@ -133,6 +135,7 @@ public class ClickHouseDao {
 
     // TODO: хранить BatchWriter вместо событий на запись
     private Map<Class, ConcurrentLinkedQueue<DbEvent>> writeCache = new ConcurrentHashMap<>();
+    private Map<Class, Lock> writeLocks = new ConcurrentHashMap<>();
 
     private ChAnnotationScanner annotationScanner;
 
@@ -185,7 +188,17 @@ public class ClickHouseDao {
         }
         ConcurrentLinkedQueue<DbEvent> queue = writeCache.computeIfAbsent(clazz, aClass -> new ConcurrentLinkedQueue<DbEvent>());
         notNull(queue, "unsupported type of queue %s", clazz);
-        queue.addAll(events);
+        Lock lock = writeLocks.computeIfAbsent(clazz, aClass -> new ReentrantLock());
+        if (lock.tryLock()) {
+            try {
+                drainToBatch(clazz, queue);
+                drainToBatch(clazz, events);
+            } finally {
+                lock.unlock();
+            }
+        } else {
+            queue.addAll(events);
+        }
     }
 
     public <T extends DbEvent> void save(T event) {
@@ -198,7 +211,17 @@ public class ClickHouseDao {
         Class<? extends DbEvent> clazz = event.getClass();
         ConcurrentLinkedQueue<DbEvent> queue = writeCache.computeIfAbsent(clazz, aClass -> new ConcurrentLinkedQueue<DbEvent>());
         notNull(queue, "unsupported type of queue %s", clazz);
-        queue.add(event);
+        Lock lock = writeLocks.computeIfAbsent(clazz, aClass -> new ReentrantLock());
+        if (lock.tryLock()) {
+            try {
+                drainToBatch(clazz, queue);
+                drainToBatch(clazz, List.of(event));
+            } finally {
+                lock.unlock();
+            }
+        } else {
+            queue.add(event);
+        }
     }
 
     private boolean isEnabledWrite() {
@@ -240,21 +263,36 @@ public class ClickHouseDao {
 
     private void writeImpInBatch() {
         try {
-            for (Map.Entry<Class, ConcurrentLinkedQueue<DbEvent>> queueEntry : writeCache.entrySet()) {
-                ConcurrentLinkedQueue<? extends DbEvent> impEvents = queueEntry.getValue();
-                if (impEvents.size() == 0) {
-                    continue;
-                }
-
-                Class<? extends DbEvent> clazz = impEvents.peek().getClass();
-                DbEvent evt;
-                while ((evt = impEvents.poll()) != null) {
-                    appendToBatchAndFlushIfNeeded(clazz, evt);
-                }
-            }
             Set<Map.Entry<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>>> s = new HashSet<>(batches.entrySet());
             for (Map.Entry<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>> entry : s) {
-                appendToBatchAndFlushIfNeeded(entry.getKey(), null);
+                Lock lock = writeLocks.get(entry.getKey());
+                lock.lock();
+                try {
+                    flushIfNeeded(entry.getKey());
+                } finally {
+                    lock.unlock();
+                }
+            }
+        } catch (Throwable t) {
+            log.error("writeImpInBatch(): ", t);
+        }
+    }
+
+    private void drainToBatch(Class<? extends DbEvent> clazz, ConcurrentLinkedQueue<? extends DbEvent> queue) {
+        try {
+            DbEvent evt;
+            while ((evt = queue.poll()) != null) {
+                appendToBatch(clazz, evt);
+            }
+        } catch (Exception e) {
+            log.error("error building batch sql", e);
+        }
+    }
+
+    private void drainToBatch(Class<? extends DbEvent> clazz, List<? extends DbEvent> events) {
+        try {
+            for (int i = 0; i < events.size(); i++) {
+                appendToBatch(clazz, events.get(i));
             }
         } catch (Exception e) {
             log.error("error building batch sql", e);
@@ -262,16 +300,11 @@ public class ClickHouseDao {
     }
 
     /**
-     * Добавляем evt в batch, или ничего не делаем если null
      * Проверяем не надо ли флашнуть batch
      * @param evtClazz класс с котором ассоциирован батч
-     * @param evt объект для запили
      */
-    private void appendToBatchAndFlushIfNeeded(@NotNull Class<? extends DbEvent> evtClazz, @Nullable DbEvent evt) {
+    private void flushIfNeeded(@NotNull Class<? extends DbEvent> evtClazz) {
         BatchWriter batchWriter = getBatch(evtClazz);
-        if (evt != null) {
-            batchWriter.push(evt);
-        }
         boolean triggerBatch = batchWriter.getSize() >= triggerBatchSize;
         boolean triggerTimeAndNotEmpty = !DateUtil.checkNoTimeout(batchWriter.getCreationTs(), triggerDelay) && batchWriter.hasData();
         if (triggerBatch || triggerTimeAndNotEmpty) {
@@ -288,6 +321,13 @@ public class ClickHouseDao {
             } catch (Exception e) {
                 log.error("failed to insert batch#{}", insertCount.get(), e);
             }
+        }
+    }
+
+    private void appendToBatch(@NotNull Class<? extends DbEvent> evtClazz, @Nullable DbEvent evt) {
+        BatchWriter batchWriter = getBatch(evtClazz);
+        if (evt != null) {
+            batchWriter.push(evt);
         }
     }
 
