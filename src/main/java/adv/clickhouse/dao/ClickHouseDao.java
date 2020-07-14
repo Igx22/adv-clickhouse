@@ -466,31 +466,38 @@ public class ClickHouseDao {
                 return;
             }
             File[] batchTasks = BatchTask.listFailure();
-            for (File f : batchTasks) {
-                if (networkActive.get()) {
-                    return;
-                }
-                BatchTask task = new BatchTask(f);
-                if (isBatchInserted(task.id, task.table)) {
-                    task.markSuccess();
-                } else {
-                    send(new String(FileUtil.readFileFast(task.getFile().getAbsolutePath()), StandardCharsets.UTF_8), task).thenAccept(status -> {
-                        switch (status) {
-                            case SUCCESS:
-                                task.markSuccess();
-                                break;
-                            case FAILURE:
-                                task.markGarbage();
-                                break;
-                            case PENDING:
-                                task.markFailure();
-                                break;
-                        }
-                    }).get();
-                }
+            while (batchTasks.length > 0) {
+                retryBatches(batchTasks);
+                batchTasks = BatchTask.listFailure();
             }
         } catch (Throwable t) {
             log.error("retry(): ", t);
+        }
+    }
+
+    private void retryBatches(File[] batchTasks) throws InterruptedException, ExecutionException, IOException {
+        for (File f : batchTasks) {
+            while (networkActive.get()) {
+                ThreadUtil.sleep(500);
+            }
+            BatchTask task = new BatchTask(f);
+            if (isBatchInserted(task.id, task.table)) {
+                task.markSuccess();
+            } else {
+                send(new String(FileUtil.readFileFast(task.getFile().getAbsolutePath()), StandardCharsets.UTF_8), task).thenAccept(status -> {
+                    switch (status) {
+                        case SUCCESS:
+                            task.markSuccess();
+                            break;
+                        case FAILURE:
+                            task.markGarbage();
+                            break;
+                        case PENDING:
+                            task.markFailure();
+                            break;
+                    }
+                }).get();
+            }
         }
     }
 
