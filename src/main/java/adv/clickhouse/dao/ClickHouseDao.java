@@ -131,6 +131,9 @@ public class ClickHouseDao {
     @Value("${clickhouse.insert.success.maxAgeHours:24}")
     private int maxSuccessAgeHours;
 
+    @Value("${clickhouse.insertTimeoutSec:300}")
+    private int insertTimeoutSec;
+
     private AsyncHttpClient httpClient;
 
     // TODO: хранить BatchWriter вместо событий на запись
@@ -152,6 +155,8 @@ public class ClickHouseDao {
         AsyncHttpClientConfig asyncHttpClientConfig = new DefaultAsyncHttpClientConfig.Builder()
                 .setThreadFactory(ExecutorUtil.createNamedThreadFactory("clickhouse-dao-ahc-"))
                 .setIoThreadsCount(ioThreads)
+                .setRequestTimeout(insertTimeoutSec * 1000)
+                .setReadTimeout(insertTimeoutSec * 1000)
                 .build();
         httpClient = new DefaultAsyncHttpClient(asyncHttpClientConfig);
 
