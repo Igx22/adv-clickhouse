@@ -465,7 +465,7 @@ public class ClickHouseDao {
     }
 
     @Scheduled(cron = "${clickhouse.insert.failed.retryCron:0 0 0 * * *}")
-    public synchronized void retry() {
+    public void retry() {
         try {
             if (!isEnabledWrite()) {
                 return;
