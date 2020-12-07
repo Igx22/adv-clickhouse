@@ -137,7 +137,9 @@ public class ClickHouseDao {
     private AsyncHttpClient httpClient;
 
     // TODO: хранить BatchWriter вместо событий на запись
+    // Очереди событий каждого типа
     private Map<Class, ConcurrentLinkedQueue<DbEvent>> writeCache = new ConcurrentHashMap<>();
+    // Локи
     private Map<Class, Lock> writeLocks = new ConcurrentHashMap<>();
 
     private ChAnnotationScanner annotationScanner;
@@ -147,7 +149,24 @@ public class ClickHouseDao {
     private AtomicBoolean networkActive = new AtomicBoolean(false);
 
     private Map<Class, StringBuilder> buffers = new HashMap<>();
-    private Map<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>> batches = new HashMap<>();
+
+    protected Map<Class<? extends DbEvent>, Deque<BatchWriter<? extends DbEvent>>> batches = new HashMap<>();
+
+    public void setTriggerDelay(int triggerDelay) {
+        this.triggerDelay = triggerDelay;
+    }
+
+    public void setTriggerBatchSize(int triggerBatchSize) {
+        this.triggerBatchSize = triggerBatchSize;
+    }
+
+    public void setClickhouseDb(String clickhouseDb) {
+        this.clickhouseDb = clickhouseDb;
+    }
+
+    public void setClickhousePkg(String clickhousePkg) {
+        this.clickhousePkg = clickhousePkg;
+    }
 
     @PostConstruct
     public void init() throws IllegalAccessException, InvocationTargetException, IntrospectionException, IOException {
@@ -263,17 +282,13 @@ public class ClickHouseDao {
         if (!isEnabledWrite()) {
             return;
         }
-        writeImpInBatch();
-    }
-
-    private void writeImpInBatch() {
         try {
-            Set<Map.Entry<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>>> s = new HashSet<>(batches.entrySet());
-            for (Map.Entry<Class<? extends DbEvent>, BatchWriter<? extends DbEvent>> entry : s) {
-                Lock lock = writeLocks.get(entry.getKey());
+            Set<Class<? extends DbEvent>> s = new HashSet<>(batches.keySet());
+            for (Class<? extends DbEvent> clazz : s) {
+                Lock lock = writeLocks.get(clazz);
                 lock.lock();
                 try {
-                    flushIfNeeded(entry.getKey());
+                    flushIfNeeded(clazz);
                 } finally {
                     lock.unlock();
                 }
@@ -309,45 +324,60 @@ public class ClickHouseDao {
      * @param evtClazz класс с котором ассоциирован батч
      */
     private void flushIfNeeded(@NotNull Class<? extends DbEvent> evtClazz) {
-        BatchWriter batchWriter = getBatch(evtClazz);
-        boolean triggerBatch = batchWriter.getSize() >= triggerBatchSize;
-        boolean triggerTimeAndNotEmpty = !DateUtil.checkNoTimeout(batchWriter.getCreationTs(), triggerDelay) && batchWriter.hasData();
-        if (triggerBatch || triggerTimeAndNotEmpty) {
-            log.debug("writeImpInBatch(): class: {} triggerBySize: {}, triggerByTime: {}", evtClazz.getSimpleName(), triggerBatch, triggerTimeAndNotEmpty);
-            batchWriter.finish();
-            String insertStatement = batchWriter.getStatement();
-            batches.remove(evtClazz);
-            if (log.isTraceEnabled()) {
-                log.trace("saving query: {}", insertStatement);
-            }
-            try {
-                saveAndSend(batchWriter, insertStatement);
-                insertCount.incrementAndGet();
-            } catch (Exception e) {
-                log.error("failed to insert batch#{}", insertCount.get(), e);
+        Deque<BatchWriter<? extends DbEvent>> batches = getBatches(evtClazz);
+        BatchWriter<? extends DbEvent> batchWriter;
+        while ((batchWriter = batches.peekFirst()) != null) {
+            boolean triggerBatch = batchWriter.getSize() >= triggerBatchSize;
+            boolean triggerTimeAndNotEmpty = !DateUtil.checkNoTimeout(batchWriter.getCreationTs(), triggerDelay) && batchWriter.hasData();
+            if (triggerBatch || triggerTimeAndNotEmpty || batches.size() > 1) {
+                log.debug("writeImpInBatch(): class: {} triggerBySize: {}, triggerByTime: {}", evtClazz.getSimpleName(), triggerBatch, triggerTimeAndNotEmpty);
+                batchWriter.finish();
+                String insertStatement = batchWriter.getStatement();
+                batches.removeFirst();
+                if (log.isTraceEnabled()) {
+                    log.trace("saving query: {}", insertStatement);
+                }
+                try {
+                    saveAndSend(batchWriter, insertStatement);
+                    insertCount.incrementAndGet();
+                } catch (Exception e) {
+                    log.error("failed to insert batch#{}", insertCount.get(), e);
+                }
             }
         }
     }
 
     private void appendToBatch(@NotNull Class<? extends DbEvent> evtClazz, @Nullable DbEvent evt) {
-        BatchWriter batchWriter = getBatch(evtClazz);
+        BatchWriter batchWriter = getCurrentBatch(evtClazz, false);
         if (evt != null) {
-            batchWriter.push(evt);
+            if (!batchWriter.push(evt)) {
+                batchWriter = getCurrentBatch(evtClazz, true);
+                batchWriter.push(evt);
+            }
         }
     }
 
     @NotNull
-    private BatchWriter<? extends DbEvent> getBatch(Class clazz) {
+    private BatchWriter<? extends DbEvent> getCurrentBatch(Class clazz, boolean forceNew) {
+        Deque<BatchWriter<? extends DbEvent>> queue = batches.computeIfAbsent(
+                clazz,
+                aClass -> new LinkedList<>());
+        if (queue.isEmpty() || forceNew) {
+            queue.offerLast(new BatchWriter(
+                    UUID.randomUUID().hashCode(),
+                    clazz,
+                    buffers.computeIfAbsent(clazz, aClass -> new StringBuilder(triggerBatchSize)),
+                    annotationScanner,
+                    now()
+            ));
+        }
+        return queue.peekLast();
+    }
+
+    private Deque<BatchWriter<? extends DbEvent>> getBatches(Class clazz) {
         return batches.computeIfAbsent(
                 clazz,
-                aClass -> new BatchWriter(
-                        UUID.randomUUID().hashCode(),
-                        aClass,
-                        buffers.computeIfAbsent(aClass, aClass1 -> new StringBuilder(triggerBatchSize)),
-                        annotationScanner,
-                        now()
-                )
-        );
+                aClass -> new LinkedList<>());
     }
 
     private CompletableFuture<BatchTask.Status> saveAndSend(BatchWriter batchWriter, String statement) throws IOException {

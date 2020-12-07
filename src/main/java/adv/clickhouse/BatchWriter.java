@@ -9,6 +9,9 @@ import static adv.util.Check.notNull;
 public class BatchWriter<T extends DbEvent> {
     private static final Logger log = LoggerFactory.getLogger(BatchWriter.class);
 
+    // если UTF-16 строка превысит эту длину, при аллокации мы получим OutOfMemoryError: Requested array size exceeds VM limit
+    public static final long MAX_LENGTH = Integer.MAX_VALUE;
+
     private final int batchId;
     private final Class<T> dataType;
     private final StringBuilder insert;
@@ -63,38 +66,47 @@ public class BatchWriter<T extends DbEvent> {
         insert.append(" VALUES");
     }
 
-    public void push(T obj) {
+    public boolean push(T obj) {
         int rollbackPosition = insert.length();
+
+        StringBuilder buf = new StringBuilder();
+
         if (!firstRow) {
-            insert.append(",");
+            buf.append(",");
         }
 
-        insert.append("(");
+        buf.append("(");
         boolean firstValue = true;
         for (ChAnnotationScanner.ChFieldInfo chFieldInfo : chClassInfo.getFieldByJavaName().values()) {
             if (!firstValue) {
-                insert.append(",");
+                buf.append(",");
             }
             firstValue = false;
             try {
                 if (chFieldInfo.chType == ChType.ARRAY) {
-                    chFieldInfo.doGetAndFormatArray(obj, insert);
+                    chFieldInfo.doGetAndFormatArray(obj, buf);
                 } else if (chFieldInfo.chType == ChType.NESTED) {
-                    chFieldInfo.doGetAndFormatNested(obj, insert);
+                    chFieldInfo.doGetAndFormatNested(obj, buf);
                 } else if (chFieldInfo.isBatchId) {
-                    insert.append(batchId);
+                    buf.append(batchId);
                 } else {
-                    insert.append(chFieldInfo.doGetAndFormat(obj));
+                    buf.append(chFieldInfo.doGetAndFormat(obj));
                 }
             } catch (Exception e) {
-                insert.setLength(rollbackPosition);
                 log.error("error formatting field: {} {}", chFieldInfo.javaName, chFieldInfo, e);
                 throw new IllegalStateException(e);
             }
         }
-        insert.append(")");
+        buf.append(")");
+
+        if(buf.length() > MAX_LENGTH - insert.length()) {
+            return false;
+        } else {
+            insert.append(buf);
+        }
 
         firstRow = false;
+        return true;
     }
 
     public boolean hasData() {
