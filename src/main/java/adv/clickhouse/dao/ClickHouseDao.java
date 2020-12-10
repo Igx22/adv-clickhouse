@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 import static adv.util.Check.notNull;
 import static adv.util.DateUtil.now;
@@ -561,7 +562,29 @@ public class ClickHouseDao {
         return getList(BatchTask.garbageDir).length;
     }
 
-    private static class BatchTask {
+    public boolean isNetworkActive() {
+        return networkActive.get();
+    }
+
+    public Map<String, Integer> getCacheSizes() {
+        return writeCache.entrySet().stream().collect(Collectors.toMap(e-> e.getKey().getSimpleName(), e -> e.getValue().size()));
+    }
+
+    public Map<BatchTask.Status, List<BatchTask>> getAllTasks() {
+        Map<BatchTask.Status, List<BatchTask>> result = new HashMap<>();
+        result.put(BatchTask.Status.PENDING, Arrays.stream(BatchTask.listPending()).map(BatchTask::new).collect(Collectors.toList()));
+        result.put(BatchTask.Status.SUCCESS, Arrays.stream(BatchTask.listSuccess()).map(BatchTask::new).collect(Collectors.toList()));
+        result.put(BatchTask.Status.FAILURE, Arrays.stream(BatchTask.listFailure()).map(BatchTask::new).collect(Collectors.toList()));
+        result.put(BatchTask.Status.WRITING, Arrays.stream(BatchTask.listWriting()).map(BatchTask::new).collect(Collectors.toList()));
+        result.put(BatchTask.Status.GARBAGE, Arrays.stream(BatchTask.listGarbage()).map(BatchTask::new).collect(Collectors.toList()));
+        return result;
+    }
+
+    public Map<String, Integer> getBatchWritersSizes() {
+        return batches.entrySet().stream().collect(Collectors.toMap(e-> e.getKey().getSimpleName(), e-> e.getValue().size()));
+    }
+
+    public static class BatchTask {
         private static final Path writingDir = Paths.get("data", "clickhouse", "writing");
         private static final Path pendingDir = Paths.get("data", "clickhouse", "pending");
         private static final Path successDir = Paths.get("data", "clickhouse", "success");
@@ -599,6 +622,10 @@ public class ClickHouseDao {
             FileUtil.writeFile(file, content);
             this.file = file;
             tryRename();
+        }
+
+        public String getTable() {
+            return table;
         }
 
         private synchronized void tryRename() {
@@ -642,9 +669,7 @@ public class ClickHouseDao {
 
         static File[] listPending() {
             File[] pending = pendingDir.toFile().listFiles();
-
             Arrays.sort(pending, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-
             return pending;
         }
 
@@ -654,15 +679,24 @@ public class ClickHouseDao {
 
         static File[] listFailure() {
             File[] failure = failureDir.toFile().listFiles();
-
             Arrays.sort(failure, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
-
             return failure;
         }
 
-        enum Status {
-            PENDING, FAILURE, SUCCESS
+        static File[] listGarbage() {
+            File[] garbage = garbageDir.toFile().listFiles();
+            Arrays.sort(garbage, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            return garbage;
         }
 
+        static File[] listWriting() {
+            File[] writing = garbageDir.toFile().listFiles();
+            Arrays.sort(writing, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            return writing;
+        }
+
+        public enum Status {
+            PENDING, FAILURE, SUCCESS, WRITING, GARBAGE
+        }
     }
 }
