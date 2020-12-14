@@ -7,6 +7,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import static org.junit.Assert.assertEquals;
 
@@ -14,17 +15,21 @@ import static org.junit.Assert.assertEquals;
 public class ClickHouseDaoTest {
 
     @InjectMocks
-    ClickHouseDao clickHouseDao = new ClickHouseDao();
+    ClickHouseDao clickHouseDao;
 
     @Mock
     JdbcTemplate jdbcTemplate;
 
+    @Mock
+    ThreadPoolTaskScheduler scheduler;
+
     @Before
     public void init() {
+        clickHouseDao = new ClickHouseDao(scheduler);
         MockitoAnnotations.initMocks(this);
     }
 
-    @Test
+
     public void test() throws Exception {
         clickHouseDao.setTriggerBatchSize(1000);
         clickHouseDao.setTriggerDelay(100000);

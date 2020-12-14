@@ -12,7 +12,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Nullable;
@@ -99,7 +100,6 @@ import static adv.util.DateUtil.now;
 
 */
 @SuppressWarnings("unchecked")
-@Component
 public class ClickHouseDao {
     private static final Logger log = LoggerFactory.getLogger(ClickHouseDao.class);
 
@@ -107,9 +107,7 @@ public class ClickHouseDao {
     @Qualifier("clickHouseJdbcTemplate")
     JdbcTemplate clickTemplate;
 
-    @Autowired
-    @Qualifier("batchPool")
-    private ScheduledExecutorService scheduler;
+    private TaskScheduler scheduler;
 
     @Value("${clickhouse.httpUrl}")
     private String clickhouseHttpUrl;
@@ -135,6 +133,18 @@ public class ClickHouseDao {
     @Value("${clickhouse.insertTimeoutSec:300}")
     private int insertTimeoutSec;
 
+    @Value("${clickhouse.insert.pending.sendIntervalMs:500}")
+    private int sendPendingRate;
+
+    @Value("${clickhouse.queueCheckFixedDelay:30000}")
+    private int flushToDbRate;
+
+    @Value("${clickhouse.insert.success.cleanupIntervalMs:600000}")
+    private int cleanupRate;
+
+    @Value("${clickhouse.insert.failed.retryCron:0 0 0 * * *}")
+    String retryCron;
+
     private AsyncHttpClient httpClient;
 
     // TODO: хранить BatchWriter вместо событий на запись
@@ -152,6 +162,11 @@ public class ClickHouseDao {
     private Map<Class, StringBuilder> buffers = new HashMap<>();
 
     protected Map<Class<? extends DbEvent>, Deque<BatchWriter<? extends DbEvent>>> batches = new HashMap<>();
+
+    public ClickHouseDao(TaskScheduler clickhousePool) {
+        this.scheduler = clickhousePool;
+    }
+
 
     public void setTriggerDelay(int triggerDelay) {
         this.triggerDelay = triggerDelay;
@@ -195,6 +210,11 @@ public class ClickHouseDao {
             httpClient.close();
             throw e;
         }
+
+        scheduler.scheduleAtFixedRate(this::jobSendPending, sendPendingRate);
+        scheduler.scheduleAtFixedRate(this::jobFlushToDb, flushToDbRate);
+        scheduler.scheduleAtFixedRate(this::jobCleanup, cleanupRate);
+        scheduler.schedule(this::jobRetry, new CronTrigger(retryCron));
     }
 
     @PreDestroy
@@ -278,8 +298,8 @@ public class ClickHouseDao {
      * Пишем все события которые накопились на данный момент в базу,
      * надо писать пачками от 10к штук
      */
-    @Scheduled(fixedRateString = "${clickhouse.queueCheckFixedDelay}")
-    public synchronized void flushToDb() {
+    public synchronized void jobFlushToDb() {
+        log.debug("jobFlushToDb(): started");
         if (!isEnabledWrite()) {
             return;
         }
@@ -444,8 +464,8 @@ public class ClickHouseDao {
         return new ChAnnotationScanner.DbEventMapper(clazz, annotationScanner);
     }
 
-    @Scheduled(fixedRateString = "${clickhouse.insert.pending.sendIntervalMs:500}")
-    public synchronized void sendPending() {
+    public synchronized void jobSendPending() {
+        log.debug("jobSendPending(): started");
         try {
             if (!isEnabledWrite()) {
                 return;
@@ -478,8 +498,8 @@ public class ClickHouseDao {
         }
     }
 
-    @Scheduled(fixedRateString = "${clickhouse.insert.success.cleanupIntervalMs:600000}")
-    public synchronized void cleanup() {
+    public synchronized void jobCleanup() {
+        log.debug("jobCleanup(): started");
         try {
             if (!isEnabledWrite()) {
                 return;
@@ -495,8 +515,8 @@ public class ClickHouseDao {
         }
     }
 
-    @Scheduled(cron = "${clickhouse.insert.failed.retryCron:0 0 0 * * *}")
-    public void retry() {
+    public void jobRetry() {
+        log.debug("jobRetry(): started");
         try {
             if (!isEnabledWrite()) {
                 return;
