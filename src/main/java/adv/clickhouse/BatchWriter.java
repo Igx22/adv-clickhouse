@@ -83,14 +83,16 @@ public class BatchWriter<T extends DbEvent> {
             }
             firstValue = false;
             try {
-                if (chFieldInfo.chType == ChType.ARRAY) {
-                    chFieldInfo.doGetAndFormatArray(obj, buf);
-                } else if (chFieldInfo.chType == ChType.NESTED) {
-                    chFieldInfo.doGetAndFormatNested(obj, buf);
-                } else if (chFieldInfo.isBatchId) {
-                    buf.append(batchId);
-                } else {
-                    buf.append(chFieldInfo.doGetAndFormat(obj));
+                switch (chFieldInfo.chType) {
+                    case ARRAY: chFieldInfo.doGetAndFormatArray(obj, buf); break;
+                    case NESTED: chFieldInfo.doGetAndFormatNested(obj, buf); break;
+                    case TUPLE: chFieldInfo.doGetAndFormatTuple(obj, buf); break;
+                    default:
+                        if (chFieldInfo.isBatchId) {
+                            buf.append(batchId);
+                        } else {
+                            buf.append(chFieldInfo.doGetAndFormat(obj));
+                        }
                 }
             } catch (Exception e) {
                 log.error("error formatting field: {} {}", chFieldInfo.javaName, chFieldInfo, e);

@@ -176,7 +176,7 @@ public class ChAnnotationScanner {
                 final List itemList = (List) readMethod.invoke(obj);
                 if (log.isTraceEnabled()) {
                     if (log.isTraceEnabled()) {
-                        log.trace("doGetAndFormatArray: field: {} value:{}", javaName, itemList);
+                        log.trace("doGetAndFormatNested: field: {} value:{}", javaName, itemList);
                     }
                 }
                 final Class<?> itemType = getListType();
@@ -237,6 +237,39 @@ public class ChAnnotationScanner {
                 }
                 buf.append("]");
             } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }
+        
+        void doGetAndFormatTuple(Object obj, StringBuilder buf) {
+            isTrue(chType == ChType.TUPLE);
+            try {
+                final Object tupleObject = readMethod.invoke(obj);
+                if (log.isTraceEnabled()) {
+                    if (log.isTraceEnabled()) {
+                        log.trace("doGetAndFormatTuple: field: {} value:{}", javaName, tupleObject);
+                    }
+                }
+                final Class<?> tupleType = field.getType();
+                ChClassInfo tupleClassInfo = reflectionMap.get(tupleType);
+                // для каждого поля value1, value2 из nested структуры
+                boolean first = true;
+                buf.append("(");
+                for (ChFieldInfo nestedField : tupleClassInfo.getFieldByJavaName().values()) {
+                    if (!first) {
+                        buf.append(",");
+                    }
+                    first = false;
+
+                    switch (nestedField.chType) {
+                        case ARRAY: nestedField.doGetAndFormatArray(tupleObject, buf); break;
+                        case NESTED: nestedField.doGetAndFormatNested(tupleObject, buf); break;
+                        case TUPLE: nestedField.doGetAndFormatTuple(tupleObject, buf); break;
+                        default: buf.append(nestedField.doGetAndFormat(tupleObject));
+                    }
+                }
+                buf.append(")");
+            } catch (IllegalAccessException | InvocationTargetException e) {
                 throw new IllegalStateException(e);
             }
         }

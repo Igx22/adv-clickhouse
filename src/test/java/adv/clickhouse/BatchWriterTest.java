@@ -171,4 +171,38 @@ public class BatchWriterTest {
             assertEquals(batch.getSize(), sql.length());
         }
     }
+
+    @Test
+    public void testTuple() throws Exception {
+        ChAnnotationScanner chAnnotationScanner = new ChAnnotationScanner("db0", "adv.clickhouse");
+        {
+            TestTupleEvent event = new TestTupleEvent();
+            event.setColumnUInt32(1000);
+
+            TestTuple tuple = new TestTuple();
+            tuple.setColumnBool(true);
+            LocalDate dt = LocalDate.of(2017, 6, 21);
+            tuple.setColumnDate(dt);
+            tuple.setColumnDateTime(LocalDateTime.of(dt, LocalTime.of(16, 38)));
+            tuple.setColumnUInt8(8);
+            tuple.setColumnUInt16(65000);
+            tuple.setColumnUInt32(650000000);
+            tuple.setColumnUInt64(650000000000L);
+
+            List<Integer> ids = new ArrayList<>();
+            ids.add(1);
+            ids.add(2);
+            tuple.setColumnListUInt16(ids);
+
+            event.setColumnTuple(tuple);
+
+            StringBuilder sql = new StringBuilder();
+            BatchWriter<TestTupleEvent> batch = new BatchWriter<>(0, TestTupleEvent.class, sql, chAnnotationScanner, 0);
+            batch.push(event);
+            batch.finish();
+            System.out.println(sql);
+            assertEquals("INSERT INTO db0.TestTupleEvent (columnUInt32,columnTuple) VALUES(1000,(1,'2017-06-21','2017-06-21 16:38:00',650000000000,650000000,65000,8,[1,2]));", sql.toString());
+            assertEquals(batch.getSize(), sql.length());
+        }
+    }
 }

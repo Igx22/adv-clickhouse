@@ -65,6 +65,18 @@ public enum ChType implements ChConverter {
         }
     },
 
+    TUPLE {
+        @Override
+        public String formatObject(Class<?> fieldType, Object fieldValue) {
+            return null;
+        }
+
+        @Override
+        public Object parseObject(Class<?> fieldType, String sqlName, Object jdbcValue) {
+            throw new IllegalStateException();
+        }
+    },
+
     NESTED {
         @Override
         public String formatObject(Class<?> fieldType, Object fieldValue) {
