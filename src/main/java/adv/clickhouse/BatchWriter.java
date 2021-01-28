@@ -10,7 +10,7 @@ public class BatchWriter<T extends DbEvent> {
     private static final Logger log = LoggerFactory.getLogger(BatchWriter.class);
 
     // если UTF-16 строка превысит эту длину, при аллокации мы получим OutOfMemoryError: Requested array size exceeds VM limit
-    public static final long MAX_LENGTH = Integer.MAX_VALUE;
+    public static final long MAX_LENGTH = (Integer.MAX_VALUE - 8) >> 1;
 
     private final int batchId;
     private final Class<T> dataType;
