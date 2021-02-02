@@ -27,6 +27,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -515,7 +516,11 @@ public class ClickHouseDao {
         }
     }
 
-    public void jobRetry() {
+    public void scheduleRetry() {
+        scheduler.schedule(this::jobRetry, Instant.now());
+    }
+
+    private void jobRetry() {
         log.debug("jobRetry(): started");
         try {
             if (!isEnabledWrite()) {
