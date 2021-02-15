@@ -1,8 +1,11 @@
 package adv.clickhouse;
 
 import adv.clickhouse.model.DbEvent;
+import adv.util.StringUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Arrays;
 
 import static adv.util.Check.notNull;
 
@@ -10,7 +13,7 @@ public class BatchWriter<T extends DbEvent> {
     private static final Logger log = LoggerFactory.getLogger(BatchWriter.class);
 
     // если UTF-16 строка превысит эту длину, при аллокации мы получим OutOfMemoryError: Requested array size exceeds VM limit
-    public static final long MAX_LENGTH = (Integer.MAX_VALUE - 8) >> 1;
+    public static final long MAX_LENGTH = (Integer.MAX_VALUE - 8) >> 2;
 
     private final int batchId;
     private final Class<T> dataType;
