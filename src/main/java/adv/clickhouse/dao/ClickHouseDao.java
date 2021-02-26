@@ -318,6 +318,7 @@ public class ClickHouseDao {
         } catch (Throwable t) {
             log.error("writeImpInBatch(): ", t);
         }
+        log.debug("jobFlushToDb(): finished");
     }
 
     private void drainToBatch(Class<? extends DbEvent> clazz, ConcurrentLinkedQueue<? extends DbEvent> queue) {
@@ -424,10 +425,12 @@ public class ClickHouseDao {
 
     private CompletableFuture<BatchTask.Status> send(String statement, BatchTask batchTask) {
         CompletableFuture<BatchTask.Status> future;
-
+        log.debug("send(): batch {}/{}", batchTask.table, batchTask.id);
         if (networkActive.compareAndSet(false, true)) {
+            log.debug("send(): batch {}/{} sending", batchTask.table, batchTask.id);
             future = httpClient.preparePost(clickhouseHttpUrl)
                     .setHeader("Content-Type", "text/plain; charset=UTF-8")
+                    .setHeader("User-Agent", "batch=" + batchTask.table + '/' + batchTask.id)
                     .setBody(statement)
                     .execute(new AsyncCompletionHandler<BatchTask.Status>() {
                                  @Override
@@ -447,6 +450,7 @@ public class ClickHouseDao {
                                  }
                              }
                     ).toCompletableFuture().handle((status, err) -> {
+                        log.debug("send(): batch {}/{} done", batchTask.table, batchTask.id);
                         networkActive.set(false);
                         if (err != null) {
                             log.error("send():", err);
@@ -456,6 +460,7 @@ public class ClickHouseDao {
                         }
                     });
         } else {
+            log.debug("send(): batch {}/{}, client busy", batchTask.table, batchTask.id);
             future = CompletableFuture.completedFuture(BatchTask.Status.PENDING);
         }
         return future;
@@ -472,11 +477,13 @@ public class ClickHouseDao {
                 return;
             }
             if (networkActive.get()) {
+                log.debug("jobSendPending(): client busy 1");
                 return;
             }
             File[] batchTasks = BatchTask.listPending();
             for (File f : batchTasks) {
                 if (networkActive.get()) {
+                    log.debug("jobSendPending(): client busy 2");
                     return;
                 }
                 BatchTask task = new BatchTask(f);
@@ -497,6 +504,7 @@ public class ClickHouseDao {
         } catch (Throwable t) {
             log.error("sendPending(): ", t);
         }
+        log.debug("jobSendPending(): finished");
     }
 
     public synchronized void jobCleanup() {
@@ -514,6 +522,7 @@ public class ClickHouseDao {
         } catch (Throwable t) {
             log.error("cleanup(): ", t);
         }
+        log.debug("jobCleanup(): finished");
     }
 
     public void scheduleRetry() {
@@ -534,6 +543,7 @@ public class ClickHouseDao {
         } catch (Throwable t) {
             log.error("retry(): ", t);
         }
+        log.debug("jobRetry(): finished");
     }
 
     private void retryBatches(File[] batchTasks) throws InterruptedException, ExecutionException, IOException {
@@ -543,6 +553,7 @@ public class ClickHouseDao {
             }
             BatchTask task = new BatchTask(f);
             if (isBatchInserted(task.id, task.table)) {
+                log.debug("retryBatches(): batch {}/{} already inserted",  task.table, task.id);
                 task.markSuccess();
             } else {
                 send(new String(FileUtil.readFileFast(task.getFile().getAbsolutePath()), StandardCharsets.UTF_8), task).thenAccept(status -> {
@@ -659,6 +670,7 @@ public class ClickHouseDao {
             }
 
             File dest = targetDir.resolve(file.getName()).toFile();
+            log.debug("tryRename(): moving file {} to {}", file, dest);
             boolean success = file.renameTo(dest);
             if (!success) {
                 log.error("tryRename(): failed to move file {} to {}", file, dest);
