@@ -349,7 +349,9 @@ public class ClickHouseDao {
     private void flushIfNeeded(@NotNull Class<? extends DbEvent> evtClazz) {
         Deque<BatchWriter<? extends DbEvent>> batches = getBatches(evtClazz);
         BatchWriter<? extends DbEvent> batchWriter;
-        while ((batchWriter = batches.peekFirst()) != null) {
+        boolean lastBatch = false;
+        while ((batchWriter = batches.peekFirst()) != null && !lastBatch) {
+            if (batches.size() == 1) lastBatch = true;
             boolean triggerBatch = batchWriter.getSize() >= triggerBatchSize;
             boolean triggerTimeAndNotEmpty = !DateUtil.checkNoTimeout(batchWriter.getCreationTs(), triggerDelay) && batchWriter.hasData();
             if (triggerBatch || triggerTimeAndNotEmpty || batches.size() > 1) {
