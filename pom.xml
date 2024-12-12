@@ -18,7 +18,7 @@
         <guava.version>21.0</guava.version>
         <javaassist.version>3.24.1-GA</javaassist.version>
 
-        <async-http-client.version>2.8.1</async-http-client.version>
+        <async-http-client.version>3.0.1</async-http-client.version>
     </properties>
 
 
